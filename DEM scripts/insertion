@@ -1,0 +1,149 @@
+# Particle Proterties
+variable                        radii1          equal 0.00035
+variable                        radii2          equal 0.0004
+variable                        radii3          equal 0.00045
+variable                        radii4          equal 0.0005
+variable                        scale_fac       equal 8 
+variable                        scaled_radii1   equal ${radii1}*${scale_fac}
+variable                        scaled_radii2   equal ${radii2}*${scale_fac}
+variable                        scaled_radii3   equal ${radii3}*${scale_fac}
+variable                        scaled_radii4   equal ${radii4}*${scale_fac}
+variable                        density         equal 2750
+variable                        youngsModulus   equal 3e8
+variable                        poissonsRatio   equal 0.3
+
+# Reyleigh Time Calculation
+variable Rtime equal ${scaled_radii1}*PI*sqrt((${density}/${youngsModulus})*(1+${poissonsRatio})/((0.1631*${poissonsRatio}+0.8766)*(1-${poissonsRatio}*${poissonsRatio})))
+
+# CED0K, fr0.1 as the reference 
+
+atom_style  granular
+boundary    f f f  	 
+units	    si
+communicate single vel yes
+newton	    off
+
+region	    reg block -0.251 0.251 -0.3 0.3 -0.2 1.3 units box
+create_box	2 reg
+variable    cut_off_dis equal 4*${radii1}    # 2*d(min)
+neighbor	${cut_off_dis} bin      
+neigh_modify delay 0 
+
+#Material properties required for new pair styles, # 2 Types of particles
+
+fix m1 all property/global youngsModulus peratomtype 3.0e8 3.0e8 
+fix m2 all property/global poissonsRatio peratomtype 0.3 0.3
+fix m3 all property/global coefficientRestitution peratomtypepair 2 0.2 0.2 0.2 0.2
+fix m4 all property/global coefficientFriction peratomtypepair 2 0.0 0.0 0.0 0.0				   
+fix m5 all property/global coefficientRollingFriction peratomtypepair 2 0.0 0.0 0.0 0.0 
+#fix m5 all property/global coefficientRollingFriction peratomtypepair 2 0.35 0.46 0.46 0.35   # Initial used for checking SF     
+#fix m6 all property/global characteristicVelocity scalar 2
+#fix m7 all property/global cohesionEnergyDensity peratomtypepair 2 0 0 0 0
+#fix  m8 all property/global minSeparationDistanceRatio scalar 1.01
+#fix  m9 all property/global maxSeparationDistanceRatio scalar 1.1
+#fix  m10 all property/global surfaceLiquidContentInitial scalar 18.5 # %  # 10% 12%
+#fix  m11 all property/global surfaceTension scalar 3.2 
+#fix  m12 all property/global fluidViscosity scalar 0.00089 # Pa.s
+#fix  m13 all property/global contactAngle peratomtype 60 60
+
+#pair_style 	gran model hertz tangential history cohesion easo/capillary/viscous rolling_friction epsd2 
+pair_style 	gran model hertz tangential history rolling_friction epsd2 
+pair_coeff  * *
+
+###########################################################################################################################################
+
+variable				    timestep equal 0.2*${Rtime} # 10% Rayleigh Time
+timestep				    ${timestep}
+
+# Fill time 
+variable				    filltime equal 1.2                                         
+variable 				    fillparticle equal 20000                                                
+variable 				    fillparticlerate equal ${fillparticle}/${filltime}		# 20000 particles/s
+variable				    fillsteps equal ${filltime}/${timestep} 			# always transform rate into timesteps
+
+#variable	                filltime	equal	0.5		#seconds
+#variable	                fillmass	equal	2	#kg
+#variable	                fillmassrate	equal	${fillmass}/${filltime}	#kg/s
+#variable	                fillsteps	equal	${filltime}/${timestep}		#Transform time to iteration steps
+
+# Settle time
+variable		            settletime equal 0.5                                            
+variable			        settlesteps equal ${settletime}/${timestep}
+
+# Compaction time
+variable                    compaction equal 3.0
+variable                    comtime    equal  ${compaction}/${timestep}
+
+# Open time
+variable                    opentime equal 0.1 
+variable                    opensteps equal ${opentime}/${timestep}
+
+# Discharge time
+variable	                dischargetime	equal	1.0 #seconds
+variable	                dischargesteps	equal	${dischargetime}/${timestep}	#Transform time to iteration steps
+
+# Dump											
+variable		            dumptime equal 0.1
+variable 		            dumpsteps equal ceil(${dumptime}/${timestep})
+
+################################################################################################################################################
+# Generation and loading of geometry STL files
+
+fix				            box all mesh/surface file Box.stl type 2 heal auto_remove_duplicates scale 0.001 move -0.25 -0.1 0.0							
+fix					        lid all mesh/surface file Lid.stl type 2 heal auto_remove_duplicates scale 0.001 move -0.25 -0.1 0.002                                    
+fix					        ground all mesh/surface file Ground.stl type 2 heal auto_remove_duplicates scale 0.001 move -0.25 -0.1 0.0
+fix				            left all mesh/surface file left.stl type 2 heal auto_remove_duplicates scale 0.001 move -0.24 -0.1 0.0
+fix				            right all mesh/surface file right.stl type 2 heal auto_remove_duplicates scale 0.001 move -0.26 -0.1 0.0 
+fix 			            walls all wall/gran model hertz tangential history rolling_friction epsd2 mesh n_meshes 5 meshes box lid ground  left right
+
+# Generation and insertion of the particles 
+
+fix		    		        pts1 all particletemplate/sphere 32452843 atom_type 1 density constant ${density} radius constant ${scaled_radii1} 
+fix					        pts2 all particletemplate/sphere 15485863 atom_type 1 density constant ${density} radius constant ${scaled_radii2}  
+fix					        pts3 all particletemplate/sphere 15485867 atom_type 1 density constant ${density} radius constant ${scaled_radii3} 
+fix					        pts4 all particletemplate/sphere 32452867 atom_type 1 density constant ${density} radius constant ${scaled_radii4} 
+fix		   			        pdd1 all particledistribution/discrete/numberbased 49979687 4 pts1 0.25 pts2 0.25 pts3 0.25 pts4 0.25
+
+# Region for insertion
+# Steam Insertion
+#fix		                ins_mesh all mesh/surface/planar file Insertionsface.stl type 1 scale 0.001 move -0.25 -0.1 0.0
+#fix 	                    ins all insert/stream seed 86028157 distributiontemplate pdd1 &
+                            mass ${fillmass} massrate ${fillmassrate} overlapcheck yes all_in yes vel constant 0 0 -0.75 &
+                            insertion_face ins_mesh extrude_length 0.01
+
+# Insert/rate/region Insertion       
+region	                    insertion block -0.15 0.15 -0.0245 0.0245 0.28 0.77 units box
+fix                        ins all insert/rate/region seed 86028121 distributiontemplate pdd1 nparticles ${fillparticle} particlerate ${fillparticlerate} insert_every 1500 overlapcheck yes all_in yes vel constant 0. 0. -1  region insertion ntry_mc 10000
+
+# Insert/pack Insertion
+#fix                         ins all insert/pack seed 86028157 distributiontemplate pdd1 &
+                            maxattempt 1000 insert_every once overlapcheck yes orientation random &
+                            all_in yes vel constant 0.0 0.0 -1.0 region insertion volumefraction_region 0.4 &
+                            ntry_mc 10000 do_dense_pack yes
+                            
+
+# Apply nve integration to all particles that are inserted as single particles
+fix	integrator all nve/sphere 
+fix gravity all gravity 9.81 vector 0.0 0.0 -1.0
+
+
+# Dumping
+run 1
+dump				 	    dmpparticle all custom/vtk ${dumpsteps} Insertion/Particels*.vtk  id type type x y z vx vy vz fx fy fz omegax omegay omegaz radius
+dump					    dmptopbox all mesh/stl ${dumpsteps} Insertion/box*.stl box    
+dump					    dmpopening all mesh/stl ${dumpsteps} Insertion/lid*.stl lid
+dump					    dmpbottombox all mesh/stl ${dumpsteps} Insertion/ground*.stl ground
+dump                        dumpadjust1 all mesh/stl ${dumpsteps} Insertion/left*.stl left
+dump                        dumpadjust2 all mesh/stl ${dumpsteps} Insertion/right*.stl right
+
+
+# Run the simulation filling
+run 					    ${fillsteps}
+unfix					    ins
+# Run the settlings
+run				            ${settlesteps}
+
+write_restart               insertion.liggghts
+
+
+
